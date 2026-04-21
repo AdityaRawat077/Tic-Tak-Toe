@@ -1,342 +1,216 @@
-from tkinter import *
-from tkinter import ttk
-import tkinter.messagebox
-import urllib.request
-import os
-
-# ──────────────────────────────────────────────
-#  SETUP WINDOW
-# ──────────────────────────────────────────────
-root = Tk()
-root.title("Tic Tac Toe")
-root.resizable(False, False)
-
-Player1 = Player2 = Draws = 0
-
-# ──────────────────────────────────────────────
-#  BACKGROUND IMAGE (downloaded once, cached)
-# ──────────────────────────────────────────────
-BG_URL  = "https://images.unsplash.com/photo-1538370965046-79c0d6907d47?w=800&q=80"
-BG_FILE = "ttt_bg.png"
-bg_photo = None   # keep reference alive
-
-def load_background():
-    global bg_photo
-    # Try to get PIL for image support
-    try:
-        from PIL import Image, ImageTk, ImageFilter
-    except ImportError:
-        try:
-            import subprocess, sys
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "pillow", "-q"])
-            from PIL import Image, ImageTk, ImageFilter
-        except Exception:
-            return   # silently skip background if PIL unavailable
-
-    if not os.path.exists(BG_FILE):
-        try:
-            urllib.request.urlretrieve(BG_URL, BG_FILE)
-        except Exception:
-            return
-
-    try:
-        img = Image.open(BG_FILE).resize((520, 620), Image.LANCZOS)
-        # Slight dark overlay so text pops
-        overlay = Image.new("RGBA", img.size, (0, 0, 0, 120))
-        img = img.convert("RGBA")
-        img = Image.alpha_composite(img, overlay).convert("RGB")
-        bg_photo = ImageTk.PhotoImage(img)
-        bg_label = Label(root, image=bg_photo)
-        bg_label.place(x=0, y=0, relwidth=1, relheight=1)
-        bg_label.lower()   # push to back
-    except Exception:
-        pass
-
-# ──────────────────────────────────────────────
-#  FONTS & COLORS
-# ──────────────────────────────────────────────
-FONT_TITLE  = ("Segoe UI", 22, "bold")
-FONT_LABEL  = ("Segoe UI", 11)
-FONT_ENTRY  = ("Segoe UI", 12)
-FONT_BTN    = ("Segoe UI", 28, "bold")
-FONT_STATUS = ("Segoe UI", 11, "italic")
-FONT_SCORE  = ("Segoe UI", 10)
-
-CLR_BG      = "#1a1a2e"
-CLR_PANEL   = "#16213e"
-CLR_ACCENT  = "#e94560"
-CLR_GOLD    = "#f5a623"
-CLR_TEXT    = "#eaeaea"
-CLR_MUTED   = "#8899aa"
-CLR_X       = "#ff6b6b"
-CLR_O       = "#4ecdc4"
-CLR_BTN_BG  = "#0f3460"
-CLR_BTN_HOV = "#1a4a80"
-
-root.configure(bg=CLR_BG)
-root.geometry("520x620")
-
-# ──────────────────────────────────────────────
-#  GAME STATE
-# ──────────────────────────────────────────────
-p1_name   = StringVar(value="Player 1")
-p2_name   = StringVar(value="Player 2")
-p1_symbol = StringVar(value="X")
-p2_symbol = StringVar(value="O")
-
-current_turn = 1   # 1 or 2
-move_count   = 0
-game_over    = False
-buttons      = []
-
+import streamlit as st
+ 
+# ── Page config ──────────────────────────────────────────────
+st.set_page_config(page_title="Tic Tac Toe", page_icon="🎮", layout="centered")
+ 
+# ── Custom CSS ───────────────────────────────────────────────
+st.markdown("""
+<style>
+    .main { background-color: #1a1a2e; }
+    h1 { color: #e94560; text-align: center; font-size: 2.5rem; }
+    .status-box {
+        background: #16213e;
+        border-radius: 12px;
+        padding: 14px 20px;
+        text-align: center;
+        font-size: 1.2rem;
+        font-weight: bold;
+        margin-bottom: 16px;
+        color: #f5a623;
+    }
+    .score-box {
+        background: #0f3460;
+        border-radius: 10px;
+        padding: 10px;
+        text-align: center;
+        color: white;
+        font-size: 1rem;
+    }
+    .winner-msg {
+        background: #e94560;
+        color: white;
+        border-radius: 12px;
+        padding: 14px;
+        text-align: center;
+        font-size: 1.3rem;
+        font-weight: bold;
+        margin-bottom: 12px;
+    }
+    div[data-testid="stButton"] > button {
+        width: 100%;
+        height: 100px;
+        font-size: 2.5rem;
+        font-weight: bold;
+        border-radius: 12px;
+        border: 2px solid #e94560;
+        background-color: #0f3460;
+        color: white;
+        transition: 0.2s;
+    }
+    div[data-testid="stButton"] > button:hover {
+        background-color: #1a4a80;
+        border-color: #f5a623;
+    }
+</style>
+""", unsafe_allow_html=True)
+ 
+# ── Initialize session state ──────────────────────────────────
+def init_state():
+    defaults = {
+        "board": [""] * 9,
+        "current": 1,       # 1 = Player 1, 2 = Player 2
+        "winner": None,
+        "draw": False,
+        "p1_score": 0,
+        "p2_score": 0,
+        "draws": 0,
+        "p1_name": "Player 1",
+        "p2_name": "Player 2",
+        "p1_symbol": "X",
+        "p2_symbol": "O",
+        "setup_done": False,
+        "winning_cells": [],
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+ 
+init_state()
+ 
+# ── Win check ─────────────────────────────────────────────────
 WINNING_COMBOS = [
-    (0,1,2),(3,4,5),(6,7,8),   # rows
-    (0,3,6),(1,4,7),(2,5,8),   # cols
-    (0,4,8),(2,4,6)            # diagonals
+    (0,1,2),(3,4,5),(6,7,8),
+    (0,3,6),(1,4,7),(2,5,8),
+    (0,4,8),(2,4,6)
 ]
-
-# ──────────────────────────────────────────────
-#  SETUP DIALOG  (shown before main game)
-# ──────────────────────────────────────────────
-def open_setup_dialog():
-    dlg = Toplevel(root)
-    dlg.title("Game Setup")
-    dlg.geometry("380x420")
-    dlg.configure(bg=CLR_PANEL)
-    dlg.resizable(False, False)
-    dlg.grab_set()                    # modal
-    dlg.transient(root)
-
-    # ── Title ──
-    Label(dlg, text="⚔  Tic Tac Toe", font=("Segoe UI", 18, "bold"),
-          bg=CLR_PANEL, fg=CLR_ACCENT).pack(pady=(20, 4))
-    Label(dlg, text="Customize your game before you begin",
-          font=FONT_STATUS, bg=CLR_PANEL, fg=CLR_MUTED).pack(pady=(0, 18))
-
-    frame = Frame(dlg, bg=CLR_PANEL)
-    frame.pack(padx=30, fill=X)
-
-    def row(parent, label_text, var, options=None, width=14):
-        f = Frame(parent, bg=CLR_PANEL)
-        f.pack(fill=X, pady=5)
-        Label(f, text=label_text, font=FONT_LABEL, bg=CLR_PANEL,
-              fg=CLR_TEXT, width=18, anchor=W).pack(side=LEFT)
-        if options:
-            cb = ttk.Combobox(f, textvariable=var, values=options,
-                              width=width, state="readonly", font=FONT_ENTRY)
-            cb.pack(side=LEFT)
+ 
+def check_winner(board, symbol):
+    for combo in WINNING_COMBOS:
+        if all(board[i] == symbol for i in combo):
+            return list(combo)
+    return None
+ 
+def handle_click(idx):
+    s = st.session_state
+    if s.board[idx] != "" or s.winner or s.draw:
+        return
+    sym = s.p1_symbol if s.current == 1 else s.p2_symbol
+    s.board[idx] = sym
+    winning = check_winner(s.board, sym)
+    if winning:
+        s.winner = s.current
+        s.winning_cells = winning
+        if s.current == 1:
+            s.p1_score += 1
         else:
-            e = Entry(f, textvariable=var, width=width+2, font=FONT_ENTRY,
-                      bg=CLR_BTN_BG, fg=CLR_TEXT, insertbackground=CLR_TEXT,
-                      relief=FLAT, bd=4)
-            e.pack(side=LEFT)
-
-    SYMBOLS = ["X", "O", "★", "♦", "♠", "♥", "♣", "▲", "●", "✦"]
-
-    Label(frame, text="── Player 1 ──", font=("Segoe UI", 10, "bold"),
-          bg=CLR_PANEL, fg=CLR_X).pack(anchor=W, pady=(6, 2))
-    row(frame, "Name:",   p1_name)
-    row(frame, "Symbol:", p1_symbol, SYMBOLS)
-
-    Label(frame, text="── Player 2 ──", font=("Segoe UI", 10, "bold"),
-          bg=CLR_PANEL, fg=CLR_O).pack(anchor=W, pady=(12, 2))
-    row(frame, "Name:",   p2_name)
-    row(frame, "Symbol:", p2_symbol, SYMBOLS)
-
-    def validate_and_start():
-        s1 = p1_symbol.get().strip()
-        s2 = p2_symbol.get().strip()
-        n1 = p1_name.get().strip() or "Player 1"
-        n2 = p2_name.get().strip() or "Player 2"
-        if s1 == s2:
-            tkinter.messagebox.showwarning("Oops",
-                "Both players have the same symbol!\nPlease pick different ones.", parent=dlg)
-            return
-        p1_name.set(n1)
-        p2_name.set(n2)
-        dlg.destroy()
-        build_game_ui()
-
-    Button(dlg, text="▶  Start Game", font=("Segoe UI", 12, "bold"),
-           bg=CLR_ACCENT, fg="white", activebackground="#c73652",
-           relief=FLAT, bd=0, padx=20, pady=10,
-           command=validate_and_start).pack(pady=24)
-
-    dlg.protocol("WM_DELETE_WINDOW", validate_and_start)
-    root.wait_window(dlg)
-
-# ──────────────────────────────────────────────
-#  MAIN GAME UI
-# ──────────────────────────────────────────────
-main_frame = None
-
-def build_game_ui():
-    global main_frame, buttons, current_turn, move_count, game_over
-    global Player1, Player2, Draws
-
-    # Reset state
-    current_turn = 1
-    move_count   = 0
-    game_over    = False
-    buttons      = []
-
-    if main_frame:
-        main_frame.destroy()
-
-    main_frame = Frame(root, bg="", bd=0)   # transparent to show bg
-    main_frame.pack(expand=True, fill=BOTH, padx=18, pady=14)
-
-    # ── Title bar ──
-    title_bar = Frame(main_frame, bg=CLR_PANEL, bd=0)
-    title_bar.pack(fill=X, pady=(0, 10))
-    Label(title_bar, text="✦  TIC TAC TOE  ✦",
-          font=FONT_TITLE, bg=CLR_PANEL, fg=CLR_ACCENT,
-          pady=8).pack()
-
-    # ── Score board ──
-    score_bar = Frame(main_frame, bg=CLR_PANEL)
-    score_bar.pack(fill=X, pady=(0, 8))
-
-    score_bar.columnconfigure(0, weight=1)
-    score_bar.columnconfigure(1, weight=1)
-    score_bar.columnconfigure(2, weight=1)
-
-    p1_score_var = StringVar()
-    p2_score_var = StringVar()
-    draw_var      = StringVar()
-
-    def refresh_scores():
-        p1_score_var.set(f"{p1_name.get()}\n{p1_symbol.get()}  ·  {Player1} wins")
-        p2_score_var.set(f"{p2_name.get()}\n{p2_symbol.get()}  ·  {Player2} wins")
-        draw_var.set(f"Draws\n{Draws}")
-
-    Label(score_bar, textvariable=p1_score_var, font=FONT_SCORE,
-          bg=CLR_PANEL, fg=CLR_X, pady=6).grid(row=0, column=0, sticky=EW)
-    Label(score_bar, textvariable=draw_var, font=FONT_SCORE,
-          bg=CLR_PANEL, fg=CLR_MUTED, pady=6).grid(row=0, column=1, sticky=EW)
-    Label(score_bar, textvariable=p2_score_var, font=FONT_SCORE,
-          bg=CLR_PANEL, fg=CLR_O, pady=6).grid(row=0, column=2, sticky=EW)
-
-    refresh_scores()
-
-    # ── Status label ──
-    status_var = StringVar(value=f"{p1_name.get()}'s turn  ({p1_symbol.get()})")
-    status_lbl = Label(main_frame, textvariable=status_var,
-                       font=FONT_STATUS, bg=CLR_BG, fg=CLR_GOLD, pady=4)
-    status_lbl.pack()
-
-    # ── Game grid ──
-    grid_frame = Frame(main_frame, bg=CLR_ACCENT, bd=2)
-    grid_frame.pack(pady=8)
-
-    style = ttk.Style()
-    style.configure("Game.TButton",
-                    font=FONT_BTN, padding=20,
-                    background=CLR_BTN_BG, foreground=CLR_TEXT)
-
-    for i in range(9):
-        btn = Button(
-            grid_frame, text=" ", font=FONT_BTN,
-            width=3, height=1,
-            bg=CLR_BTN_BG, fg=CLR_TEXT,
-            activebackground=CLR_BTN_HOV,
-            relief=FLAT, bd=0,
-            command=lambda idx=i: on_click(idx)
-        )
-        btn.grid(row=i//3, column=i%3, padx=2, pady=2, ipadx=18, ipady=14)
-        buttons.append(btn)
-
-    # ── Restart button ──
-    def restart():
-        global current_turn, move_count, game_over
-        current_turn = 1
-        move_count   = 0
-        game_over    = False
-        for b in buttons:
-            b.config(text=" ", state=NORMAL, fg=CLR_TEXT, bg=CLR_BTN_BG)
-        status_var.set(f"{p1_name.get()}'s turn  ({p1_symbol.get()})")
-
-    def new_game():
-        open_setup_dialog()
-
-    btn_row = Frame(main_frame, bg=CLR_BG)
-    btn_row.pack(pady=10, fill=X)
-
-    Button(btn_row, text="↺  Restart", font=("Segoe UI", 10, "bold"),
-           bg=CLR_BTN_BG, fg=CLR_TEXT, activebackground=CLR_BTN_HOV,
-           relief=FLAT, bd=0, padx=14, pady=7,
-           command=restart).pack(side=LEFT, expand=True, padx=6)
-
-    Button(btn_row, text="⚙  New Game", font=("Segoe UI", 10, "bold"),
-           bg=CLR_ACCENT, fg="white", activebackground="#c73652",
-           relief=FLAT, bd=0, padx=14, pady=7,
-           command=new_game).pack(side=LEFT, expand=True, padx=6)
-
-    # ── Click handler ──
-    def on_click(idx):
-        global current_turn, move_count, game_over, Player1, Player2, Draws
-
-        if game_over or buttons[idx]["text"] != " ":
-            return
-
-        sym  = p1_symbol.get() if current_turn == 1 else p2_symbol.get()
-        clr  = CLR_X            if current_turn == 1 else CLR_O
-        name = p1_name.get()    if current_turn == 1 else p2_name.get()
-
-        buttons[idx].config(text=sym, fg=clr, state=DISABLED, disabledforeground=clr)
-        move_count += 1
-
-        # Check win
-        board = [b["text"] for b in buttons]
-        winner = None
-        for combo in WINNING_COMBOS:
-            a, bv, c = combo
-            if board[a] == board[bv] == board[c] == sym:
-                winner = combo
-                break
-
-        if winner:
-            game_over = True
-            for idx2 in winner:
-                buttons[idx2].config(bg=CLR_ACCENT)
-            if current_turn == 1:
-                Player1 += 1
-            else:
-                Player2 += 1
-            refresh_scores()
-            status_var.set(f"🏆  {name} wins!")
-            save_result(f"Winner is {name} ({sym})")
-            tkinter.messagebox.showinfo("🏆 Winner!", f"{name} wins this round!")
-            return
-
-        if move_count == 9:
-            game_over = True
-            Draws += 1
-            refresh_scores()
-            status_var.set("🤝  It's a Draw!")
-            save_result("Match is Drawn")
-            tkinter.messagebox.showinfo("Draw!", "It's a draw! Well played both.")
-            return
-
-        current_turn = 2 if current_turn == 1 else 1
-        next_name = p1_name.get() if current_turn == 1 else p2_name.get()
-        next_sym  = p1_symbol.get() if current_turn == 1 else p2_symbol.get()
-        status_var.set(f"{next_name}'s turn  ({next_sym})")
-
-# ──────────────────────────────────────────────
-#  RESULT FILE
-# ──────────────────────────────────────────────
-def save_result(text):
-    try:
-        with open("result.txt", "a") as f:
-            f.write(text + "\n")
-    except Exception:
-        pass
-
-# ──────────────────────────────────────────────
-#  LAUNCH
-# ──────────────────────────────────────────────
-load_background()
-open_setup_dialog()
-
-root.mainloop()
+            s.p2_score += 1
+    elif all(c != "" for c in s.board):
+        s.draw = True
+        s.draws += 1
+    else:
+        s.current = 2 if s.current == 1 else 1
+ 
+def restart():
+    st.session_state.board = [""] * 9
+    st.session_state.current = 1
+    st.session_state.winner = None
+    st.session_state.draw = False
+    st.session_state.winning_cells = []
+ 
+def new_game():
+    restart()
+    st.session_state.setup_done = False
+ 
+# ── SETUP SCREEN ──────────────────────────────────────────────
+if not st.session_state.setup_done:
+    st.markdown("<h1>⚔️ Tic Tac Toe</h1>", unsafe_allow_html=True)
+    st.markdown("### ⚙️ Game Setup")
+ 
+    SYMBOLS = ["X", "O", "★", "♦", "♠", "♥", "♣", "▲", "●"]
+ 
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**🔴 Player 1**")
+        p1_name = st.text_input("Name", value="Player 1", key="inp_p1_name")
+        p1_sym  = st.selectbox("Symbol", SYMBOLS, index=0, key="inp_p1_sym")
+    with col2:
+        st.markdown("**🔵 Player 2**")
+        p2_name = st.text_input("Name", value="Player 2", key="inp_p2_name")
+        p2_sym  = st.selectbox("Symbol", SYMBOLS, index=1, key="inp_p2_sym")
+ 
+    if st.button("▶  Start Game", use_container_width=True):
+        if p1_sym == p2_sym:
+            st.error("⚠️ Both players have the same symbol! Please choose different ones.")
+        else:
+            st.session_state.p1_name   = p1_name or "Player 1"
+            st.session_state.p2_name   = p2_name or "Player 2"
+            st.session_state.p1_symbol = p1_sym
+            st.session_state.p2_symbol = p2_sym
+            st.session_state.setup_done = True
+            restart()
+            st.rerun()
+ 
+# ── GAME SCREEN ───────────────────────────────────────────────
+else:
+    s = st.session_state
+    st.markdown("<h1>🎮 Tic Tac Toe</h1>", unsafe_allow_html=True)
+ 
+    # Score board
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        st.markdown(f"""<div class="score-box">
+            <div style="color:#ff6b6b;font-weight:bold">{s.p1_name}</div>
+            <div style="font-size:0.85rem">{s.p1_symbol} · {s.p1_score} wins</div>
+        </div>""", unsafe_allow_html=True)
+    with sc2:
+        st.markdown(f"""<div class="score-box">
+            <div style="color:#aaa">Draws</div>
+            <div style="font-size:1.2rem;font-weight:bold">{s.draws}</div>
+        </div>""", unsafe_allow_html=True)
+    with sc3:
+        st.markdown(f"""<div class="score-box">
+            <div style="color:#4ecdc4;font-weight:bold">{s.p2_name}</div>
+            <div style="font-size:0.85rem">{s.p2_symbol} · {s.p2_score} wins</div>
+        </div>""", unsafe_allow_html=True)
+ 
+    st.markdown("<br>", unsafe_allow_html=True)
+ 
+    # Status bar
+    if s.winner:
+        name = s.p1_name if s.winner == 1 else s.p2_name
+        sym  = s.p1_symbol if s.winner == 1 else s.p2_symbol
+        st.markdown(f'<div class="winner-msg">🏆 {name} ({sym}) Wins!</div>', unsafe_allow_html=True)
+    elif s.draw:
+        st.markdown('<div class="winner-msg" style="background:#555">🤝 It\'s a Draw!</div>', unsafe_allow_html=True)
+    else:
+        cur_name = s.p1_name if s.current == 1 else s.p2_name
+        cur_sym  = s.p1_symbol if s.current == 1 else s.p2_symbol
+        st.markdown(f'<div class="status-box">🎯 {cur_name}\'s turn &nbsp;({cur_sym})</div>', unsafe_allow_html=True)
+ 
+    # Game board — 3x3 grid
+    for row in range(3):
+        cols = st.columns(3)
+        for col in range(3):
+            idx = row * 3 + col
+            cell_val = s.board[idx]
+            is_winning = idx in s.winning_cells
+ 
+            label = cell_val if cell_val else " "
+            with cols[col]:
+                if st.button(label, key=f"cell_{idx}", disabled=bool(s.winner or s.draw or cell_val != "")):
+                    handle_click(idx)
+                    st.rerun()
+ 
+    st.markdown("<br>", unsafe_allow_html=True)
+ 
+    # Action buttons
+    btn1, btn2 = st.columns(2)
+    with btn1:
+        if st.button("↺  Restart (same players)", use_container_width=True):
+            restart()
+            st.rerun()
+    with btn2:
+        if st.button("⚙️  New Game (change names)", use_container_width=True):
+            new_game()
+            st.rerun()
+ 
